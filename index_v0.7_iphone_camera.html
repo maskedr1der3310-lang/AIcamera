@@ -1,0 +1,856 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>整骨院 姿勢分析アプリ</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif;
+      background: #0f172a; color: #e2e8f0;
+      min-height: 100vh; display: flex; flex-direction: column; align-items: center;
+      padding: 12px; padding-bottom: 40px;
+    }
+    h1 { font-size: 1.25rem; font-weight: 600; margin-bottom: 4px; text-align: center; }
+    .subtitle { font-size: 0.85rem; color: #94a3b8; margin-bottom: 12px; text-align: center; }
+
+    .container {
+      position: relative; width: 100%; max-width: 480px; aspect-ratio: 3/4;
+      background: #1e293b; border-radius: 16px; overflow: hidden;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.4);
+    }
+    /* videoは非表示。canvasだけ見せる */
+    #video {
+      position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none;
+    }
+    #canvas {
+      position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+      object-fit: cover;
+    }
+
+    .controls {
+      width: 100%; max-width: 480px; margin-top: 14px;
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    button {
+      padding: 14px 18px; font-size: 1rem; font-weight: 600;
+      border: none; border-radius: 12px; cursor: pointer;
+    }
+    .btn-primary { background: #3b82f6; color: white; }
+    .btn-primary:disabled { background: #475569; cursor: not-allowed; }
+    .btn-secondary { background: #334155; color: #e2e8f0; }
+    .btn-success { background: #10b981; color: white; }
+    .btn-warning { background: #f59e0b; color: #000; }
+    .btn-danger { background: #64748b; color: white; }
+
+    .status { text-align: center; font-size: 0.9rem; color: #94a3b8; min-height: 22px; margin-top: 4px; }
+    .status.active { color: #4ade80; }
+    .status.error { color: #f87171; }
+    .status.measuring { color: #fbbf24; font-weight: 600; }
+
+    .camera-info { text-align: center; font-size: 0.8rem; color: #94a3b8; margin-top: 2px; }
+    .camera-info.warn { color: #fbbf24; }
+
+    .mode-select, .movement-select {
+      width: 100%; max-width: 480px; display: none; flex-wrap: wrap; gap: 8px; margin-top: 10px;
+    }
+    .mode-select button, .movement-select button { flex: 1 1 45%; min-width: 140px; }
+
+    .guide-box {
+      width: 100%; max-width: 480px; background: #1e293b; border-radius: 12px;
+      padding: 14px; margin-top: 12px; display: none; font-size: 0.9rem; line-height: 1.5;
+    }
+    .guide-box h3 { font-size: 1rem; margin-bottom: 8px; color: #fbbf24; }
+    .guide-box ol { padding-left: 20px; color: #cbd5e1; }
+
+    .live-overlay {
+      position: absolute; bottom: 0; left: 0; right: 0;
+      background: rgba(15, 23, 42, 0.93);
+      padding: 14px 16px; z-index: 20; display: none;
+      border-top: 2px solid #fbbf24;
+    }
+    .live-overlay.active { display: block; }
+
+    .angle-row { display: flex; justify-content: space-around; align-items: center; margin-bottom: 8px; }
+    .angle-box { text-align: center; }
+    .angle-box .num { font-size: 2.2rem; font-weight: 700; line-height: 1.1; }
+    .angle-box .num.cur { color: #fbbf24; }
+    .angle-box .num.max { color: #4ade80; }
+    .angle-box .lbl { font-size: 0.75rem; color: #94a3b8; margin-top: 2px; }
+
+    .feedback { text-align: center; font-size: 0.9rem; min-height: 22px; margin-bottom: 6px; }
+    .feedback.good { color: #4ade80; }
+    .feedback.warn { color: #f87171; }
+
+    .rom-bar { height: 8px; background: #334155; border-radius: 4px; overflow: hidden; }
+    .rom-fill { height: 100%; background: linear-gradient(90deg, #fbbf24, #4ade80); transition: width 0.12s; }
+
+    .posture-live {
+      position: absolute; top: 10px; left: 10px; right: 10px;
+      background: rgba(15, 23, 42, 0.9); border-radius: 10px;
+      padding: 10px 12px; z-index: 15; display: none; font-size: 0.85rem;
+    }
+    .posture-live .row { display: flex; justify-content: space-between; margin-bottom: 4px; }
+    .posture-live .row:last-child { margin-bottom: 0; }
+    .posture-live .label { color: #94a3b8; }
+    .posture-live .value { font-weight: 700; color: #fbbf24; }
+
+    .results-panel {
+      width: 100%; max-width: 480px; margin-top: 14px;
+      background: #1e293b; border-radius: 16px; padding: 18px; display: none;
+    }
+    .results-panel h2 { font-size: 1.05rem; margin-bottom: 14px; text-align: center; color: #f1f5f9; }
+    .metric {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 10px 0; border-bottom: 1px solid #334155;
+    }
+    .metric:last-of-type { border-bottom: none; }
+    .metric-label { font-size: 0.9rem; color: #cbd5e1; }
+    .metric-value { font-size: 1.05rem; font-weight: 700; }
+    .metric-value.good { color: #4ade80; }
+    .metric-value.warn { color: #fbbf24; }
+    .metric-value.bad { color: #f87171; }
+    .comment {
+      margin-top: 12px; padding: 12px; background: #0f172a; border-radius: 10px;
+      font-size: 0.85rem; line-height: 1.5; color: #e2e8f0;
+    }
+
+    .info-box {
+      width: 100%; max-width: 480px; margin-top: 18px;
+      background: #1e293b; border-radius: 12px; padding: 14px;
+      font-size: 0.85rem; line-height: 1.6; color: #cbd5e1;
+    }
+    .badge {
+      display: inline-block; background: #3b82f6; color: white;
+      font-size: 0.7rem; padding: 2px 8px; border-radius: 999px; margin-bottom: 6px;
+    }
+
+    .score-card {
+      margin: 14px 0;
+      padding: 16px;
+      background: #0f172a;
+      border-radius: 14px;
+      text-align: center;
+    }
+    .score-number {
+      font-size: 3.2rem;
+      font-weight: 800;
+      line-height: 1;
+      color: #4ade80;
+    }
+    .score-label {
+      margin-top: 5px;
+      font-size: 0.8rem;
+      color: #94a3b8;
+    }
+    .score-grade {
+      margin-top: 8px;
+      font-size: 1rem;
+      font-weight: 700;
+    }
+
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <h1>整骨院 姿勢分析アプリ</h1>
+  <p class="subtitle">再生ボタン完全排除版</p>
+
+  <div class="container">
+    <video id="video" playsinline muted autoplay></video>
+    <canvas id="canvas"></canvas>
+
+    <div id="postureLive" class="posture-live">
+      <div class="row"><span class="label">肩の高さ差</span><span id="liveShoulder" class="value">—</span></div>
+      <div class="row"><span class="label">骨盤の高さ差</span><span id="liveHip" class="value">—</span></div>
+    </div>
+    <div id="sidePostureLive" class="posture-live">
+      <div class="row"><span class="label">頭部前方位</span><span id="liveHeadForward" class="value">—</span></div>
+      <div class="row"><span class="label">肩-骨盤アライメント</span><span id="liveTrunk" class="value">—</span></div>
+    </div>
+
+    <div id="liveOverlay" class="live-overlay">
+      <div class="angle-row">
+        <div class="angle-box">
+          <div id="curAngle" class="num cur">0°</div>
+          <div class="lbl">現在の角度</div>
+        </div>
+        <div class="angle-box">
+          <div id="maxAngle" class="num max">0°</div>
+          <div class="lbl">最大角度</div>
+        </div>
+      </div>
+      <div id="feedback" class="feedback"></div>
+      <div class="rom-bar"><div id="romFill" class="rom-fill" style="width:0%"></div></div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button id="startBtn" class="btn-primary">カメラを起動する</button>
+    <button id="switchBtn" class="btn-secondary hidden">カメラ切替（前面/背面）</button>
+    <div id="camInfo" class="camera-info hidden"></div>
+    <div id="cameraHelp" class="camera-info hidden">
+      iPhoneでは「設定 → Safari → カメラ」を「許可」にし、HTTPSまたはlocalhostで開いてください。
+    </div>
+
+    <div id="modeSelect" class="mode-select">
+      <button id="btnPosture" class="btn-secondary">姿勢分析（正面）</button>
+      <button id="btnSidePosture" class="btn-secondary">姿勢分析（側面）</button>
+      <button id="btnShoulder" class="btn-secondary">肩関節可動域</button>
+    </div>
+
+    <div id="moveSelect" class="movement-select">
+      <button data-m="flexion" class="btn-secondary">屈曲</button>
+      <button data-m="extension" class="btn-secondary">伸展</button>
+      <button data-m="abduction" class="btn-secondary">外転</button>
+      <button data-m="adduction" class="btn-secondary">内転</button>
+      <button data-m="external_rotation" class="btn-secondary">外旋</button>
+      <button data-m="internal_rotation" class="btn-secondary">内旋</button>
+    </div>
+
+    <button id="startMeasure" class="btn-success hidden">測定スタート</button>
+    <button id="stopMeasure" class="btn-warning hidden">測定終了（最大値を確定）</button>
+    <button id="resetBtn" class="btn-danger hidden">リセット</button>
+
+    <div id="status" class="status">準備完了。カメラを起動してください。</div>
+  </div>
+
+  <div id="guide" class="guide-box">
+    <h3 id="guideTitle">撮影ガイド</h3>
+    <ol id="guideSteps"></ol>
+  </div>
+
+  <div id="results" class="results-panel">
+    <h2 id="resTitle">測定結果</h2>
+    <div id="resContent"></div>
+    <div id="resComment" class="comment"></div>
+  </div>
+
+  <div class="info-box">
+    <span class="badge">v0.7 iPhone対応</span>
+    <p>正面・側面の姿勢分析、骨盤評価、100点姿勢スコアを追加しました。</p>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+
+  <script>
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const startBtn = document.getElementById('startBtn');
+    const switchBtn = document.getElementById('switchBtn');
+    const camInfo = document.getElementById('camInfo');
+    const cameraHelp = document.getElementById('cameraHelp');
+    const modeSelect = document.getElementById('modeSelect');
+    const moveSelect = document.getElementById('moveSelect');
+    const startMeasure = document.getElementById('startMeasure');
+    const stopMeasure = document.getElementById('stopMeasure');
+    const resetBtn = document.getElementById('resetBtn');
+    const statusEl = document.getElementById('status');
+    const guide = document.getElementById('guide');
+    const guideTitle = document.getElementById('guideTitle');
+    const guideSteps = document.getElementById('guideSteps');
+    const results = document.getElementById('results');
+    const resTitle = document.getElementById('resTitle');
+    const resContent = document.getElementById('resContent');
+    const resComment = document.getElementById('resComment');
+    const postureLive = document.getElementById('postureLive');
+    const liveShoulder = document.getElementById('liveShoulder');
+    const liveHip = document.getElementById('liveHip');
+    const sidePostureLive = document.getElementById('sidePostureLive');
+    const liveHeadForward = document.getElementById('liveHeadForward');
+    const liveTrunk = document.getElementById('liveTrunk');
+    const btnSidePosture = document.getElementById('btnSidePosture');
+    const liveOverlay = document.getElementById('liveOverlay');
+    const curAngleEl = document.getElementById('curAngle');
+    const maxAngleEl = document.getElementById('maxAngle');
+    const feedbackEl = document.getElementById('feedback');
+    const romFill = document.getElementById('romFill');
+
+    let pose = null;
+    let facing = 'environment';
+    let mirrored = false;
+    let landmarks = null;
+    let mode = null;
+    let movement = null;
+    let postureFrontResult = null;
+    let postureSideResult = null;
+    let measuring = false;
+    let maxAng = 0;
+    let angleBuf = [];
+    let animId = null;
+    let stream = null;
+
+    const LM = {
+      L_SH: 11, R_SH: 12, L_EL: 13, R_EL: 14,
+      L_WR: 15, R_WR: 16, L_HIP: 23, R_HIP: 24,
+      L_EAR: 7, R_EAR: 8
+    };
+
+    const CONN = [
+      [0,1],[1,2],[2,3],[3,7],[0,4],[4,5],[5,6],[6,8],[9,10],
+      [11,12],[11,13],[13,15],[15,17],[15,19],[15,21],[17,19],
+      [12,14],[14,16],[16,18],[16,20],[16,22],[18,20],
+      [11,23],[12,24],[23,24],[23,25],[24,26],[25,27],[26,28],
+      [27,29],[28,30],[29,31],[30,32],[27,31],[28,32]
+    ];
+
+    const NORMAL = {
+      flexion: 170, extension: 50, abduction: 170,
+      adduction: 40, external_rotation: 80, internal_rotation: 70
+    };
+
+    const GUIDES = {
+      flexion: { name: '肩関節 屈曲', steps: ['横向きに立たせる','肘を伸ばして前方へ上げる'] },
+      extension: { name: '肩関節 伸展', steps: ['横向きに立たせる','肘を伸ばして後方へ上げる'] },
+      abduction: { name: '肩関節 外転', steps: ['正面に立たせる','肘を伸ばして真横へ上げる'] },
+      adduction: { name: '肩関節 内転', steps: ['正面に立たせる','腕を内側へ動かす'] },
+      external_rotation: { name: '肩関節 外旋', steps: ['肘90度・上腕を体側に','前腕を外側へ'] },
+      internal_rotation: { name: '肩関節 内旋', steps: ['肘90度・上腕を体側に','前腕を内側へ'] }
+    };
+
+    function setStatus(t, c='') { statusEl.textContent = t; statusEl.className = 'status ' + c; }
+    function show(el) { el.classList.remove('hidden'); }
+    function hide(el) { el.classList.add('hidden'); }
+    function vis(lm, i) { return lm[i]?.visibility ?? 1; }
+
+    function angle3(a, b, c) {
+      let r = Math.atan2(c.y-b.y, c.x-b.x) - Math.atan2(a.y-b.y, a.x-b.x);
+      let d = Math.abs(r * 180 / Math.PI);
+      return d > 180 ? 360 - d : d;
+    }
+    function incline(p1, p2) {
+      return Math.atan2(p2.y-p1.y, p2.x-p1.x) * 180 / Math.PI;
+    }
+
+    function shoulderAngle(lm, mov) {
+      const useL = vis(lm, LM.L_SH) >= vis(lm, LM.R_SH);
+      const sh = useL ? lm[LM.L_SH] : lm[LM.R_SH];
+      const el = useL ? lm[LM.L_EL] : lm[LM.R_EL];
+      const wr = useL ? lm[LM.L_WR] : lm[LM.R_WR];
+      const hip = useL ? lm[LM.L_HIP] : lm[LM.R_HIP];
+      if (vis(lm, useL ? LM.L_SH : LM.R_SH) < 0.4 || vis(lm, useL ? LM.L_EL : LM.R_EL) < 0.4) return null;
+      if (['flexion','extension','abduction','adduction'].includes(mov)) {
+        return Math.min(angle3(hip, sh, el), 180);
+      }
+      if (['external_rotation','internal_rotation'].includes(mov)) {
+        let a = Math.abs(incline(el, wr));
+        if (a > 90) a = 180 - a;
+        return Math.min(a, 90);
+      }
+      return 0;
+    }
+
+    function checkForm(lm, mov) {
+      const useL = vis(lm, LM.L_SH) >= vis(lm, LM.R_SH);
+      const sh = useL ? lm[LM.L_SH] : lm[LM.R_SH];
+      const el = useL ? lm[LM.L_EL] : lm[LM.R_EL];
+      const wr = useL ? lm[LM.L_WR] : lm[LM.R_WR];
+      const hip = useL ? lm[LM.L_HIP] : lm[LM.R_HIP];
+      const msgs = [];
+      if (['flexion','extension','abduction'].includes(mov) && angle3(sh, el, wr) < 150) msgs.push('肘が曲がっています');
+      if (Math.abs(lm[LM.L_SH].y - lm[LM.R_SH].y) > 0.045) msgs.push('体が傾いている可能性');
+      if (['external_rotation','internal_rotation'].includes(mov) && angle3(hip, sh, el) > 40) msgs.push('肘が体から離れています');
+      return msgs;
+    }
+
+    function smooth(v) {
+      if (v === null) return null;
+      angleBuf.push(v);
+      if (angleBuf.length > 5) angleBuf.shift();
+      return angleBuf.reduce((a,b)=>a+b,0) / angleBuf.length;
+    }
+
+    // 正面：肩・骨盤の左右高低差と左右対称性
+    function calcPosture(lm) {
+      const leftSh = lm[LM.R_SH];
+      const rightSh = lm[LM.L_SH];
+      const leftHip = lm[LM.R_HIP];
+      const rightHip = lm[LM.L_HIP];
+
+      const sDiff = (leftSh.y - rightSh.y) * 100;
+      const hDiff = (leftHip.y - rightHip.y) * 100;
+
+      const shoulderMid = {
+        x: (leftSh.x + rightSh.x) / 2,
+        y: (leftSh.y + rightSh.y) / 2
+      };
+      const hipMid = {
+        x: (leftHip.x + rightHip.x) / 2,
+        y: (leftHip.y + rightHip.y) / 2
+      };
+
+      const hf = ((lm[LM.R_EAR].x + lm[LM.L_EAR].x)/2 - shoulderMid.x) * 100;
+      const sym = Math.max(0, 100 - (Math.abs(sDiff)*8 + Math.abs(hDiff)*8));
+
+      return { sDiff, hDiff, hf, sym };
+    }
+
+    // 側面：頭部前方位と体幹の前後アライメントを参考値として算出
+    function calcSidePosture(lm) {
+      const sh = (lm[LM.L_SH].x + lm[LM.R_SH].x) / 2;
+      const hip = (lm[LM.L_HIP].x + lm[LM.R_HIP].x) / 2;
+      const ear = (lm[LM.L_EAR].x + lm[LM.R_EAR].x) / 2;
+
+      // 側面撮影では x方向が前後方向になるため、肩に対する耳の前方偏位を評価
+      const headForward = Math.abs(ear - sh) * 100;
+      const trunk = Math.abs(sh - hip) * 100;
+
+      return { headForward, trunk };
+    }
+
+    function scoreFromDiff(v, good, warn) {
+      const a = Math.abs(v);
+      if (a <= good) return 100;
+      if (a >= warn) return 40;
+      return Math.round(100 - ((a-good)/(warn-good))*60);
+    }
+
+    function calcFrontScore(d) {
+      const shoulderScore = scoreFromDiff(d.sDiff, 0.5, 3.0);
+      const hipScore = scoreFromDiff(d.hDiff, 0.5, 3.0);
+      const symmetryScore = Math.round(Math.max(0, Math.min(100, d.sym)));
+      return Math.round(shoulderScore * 0.35 + hipScore * 0.35 + symmetryScore * 0.30);
+    }
+
+    function calcSideScore(d) {
+      // 現行MediaPipe座標だけでは実寸評価はできないため、院内比較用の参考スコア
+      const headScore = Math.max(40, Math.round(100 - Math.min(60, d.headForward * 12)));
+      const trunkScore = Math.max(40, Math.round(100 - Math.min(60, d.trunk * 8)));
+      return Math.round(headScore * 0.6 + trunkScore * 0.4);
+    }
+
+    function scoreGrade(score) {
+      if (score >= 90) return { text: '良好', cls: 'good' };
+      if (score >= 75) return { text: '概ね良好', cls: 'good' };
+      if (score >= 60) return { text: '要確認', cls: 'warn' };
+      return { text: '要注意', cls: 'bad' };
+    }
+
+    function onResults(res) {
+      // キャンバスサイズを映像に合わせる
+      if (video.videoWidth) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+      }
+
+      ctx.save();
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // ★ 映像をキャンバスに描画（これで再生ボタンが出ない）
+      if (video.readyState >= 2) {
+        if (mirrored) {
+          ctx.translate(canvas.width, 0);
+          ctx.scale(-1, 1);
+        }
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        if (mirrored) {
+          ctx.setTransform(1, 0, 0, 1, 0, 0); // リセット
+        }
+      }
+
+      if (res.poseLandmarks) {
+        landmarks = res.poseLandmarks;
+
+        // 骨格描画（鏡像時は座標も反転して合わせる）
+        const lm = landmarks;
+        if (mirrored) {
+          // 描画用に一時的に反転した座標を使うのは複雑なため、
+          // 非鏡像（背面カメラ）を推奨し、前面時は簡易対応
+        }
+
+        drawConnectors(ctx, lm, CONN, {
+          color: measuring ? '#fbbf24' : '#00FF88', lineWidth: 3
+        });
+        drawLandmarks(ctx, lm, { color: '#FF3B30', lineWidth: 1, radius: 4 });
+
+        if (mode === 'posture') {
+          const d = calcPosture(lm);
+          liveShoulder.textContent = Math.abs(d.sDiff).toFixed(1) + '% ' +
+            (d.sDiff > 0.4 ? '(左肩↓)' : d.sDiff < -0.4 ? '(右肩↓)' : '(ほぼ同)');
+          liveHip.textContent = Math.abs(d.hDiff).toFixed(1) + '% ' +
+            (d.hDiff > 0.4 ? '(左骨盤↓)' : d.hDiff < -0.4 ? '(右骨盤↓)' : '(ほぼ同)');
+          postureLive.style.display = 'block';
+          sidePostureLive.style.display = 'none';
+        }
+
+        if (mode === 'sidePosture') {
+          const d = calcSidePosture(lm);
+          liveHeadForward.textContent = d.headForward.toFixed(1) + '%';
+          liveTrunk.textContent = d.trunk.toFixed(1) + '%';
+          sidePostureLive.style.display = 'block';
+          postureLive.style.display = 'none';
+        }
+
+        if (measuring && mode === 'shoulder' && movement) {
+          const ang = smooth(shoulderAngle(lm, movement));
+          if (ang !== null) {
+            curAngleEl.textContent = Math.round(ang) + '°';
+            if (ang > maxAng) maxAng = ang;
+            maxAngleEl.textContent = Math.round(maxAng) + '°';
+            romFill.style.width = Math.min(100, (maxAng / (NORMAL[movement]||180)) * 100) + '%';
+            const issues = checkForm(lm, movement);
+            feedbackEl.textContent = issues.length ? issues.join(' / ') : 'フォーム良好';
+            feedbackEl.className = 'feedback ' + (issues.length ? 'warn' : 'good');
+          }
+        }
+      }
+      ctx.restore();
+    }
+
+    function showPostureResult() {
+      const d = calcPosture(landmarks);
+      postureFrontResult = d;
+      const score = calcFrontScore(d);
+      const grade = scoreGrade(score);
+
+      resTitle.textContent = '姿勢分析（正面）';
+      resContent.innerHTML = `
+        <div class="score-card">
+          <div class="score-number">${score}</div>
+          <div class="score-label">姿勢スコア / 100</div>
+          <div class="score-grade ${grade.cls}">${grade.text}</div>
+        </div>
+        <div class="metric"><span class="metric-label">肩の高さ差</span>
+          <span class="metric-value ${Math.abs(d.sDiff)<1?'good':Math.abs(d.sDiff)<2.5?'warn':'bad'}">
+            ${Math.abs(d.sDiff).toFixed(1)}% ${d.sDiff>0.3?'（左肩が低い）':d.sDiff<-0.3?'（右肩が低い）':'（ほぼ同じ）'}
+          </span></div>
+        <div class="metric"><span class="metric-label">骨盤の高さ差</span>
+          <span class="metric-value ${Math.abs(d.hDiff)<1?'good':Math.abs(d.hDiff)<2.5?'warn':'bad'}">
+            ${Math.abs(d.hDiff).toFixed(1)}% ${d.hDiff>0.3?'（左骨盤が低い）':d.hDiff<-0.3?'（右骨盤が低い）':'（ほぼ同じ）'}
+          </span></div>
+        <div class="metric"><span class="metric-label">左右対称性</span>
+          <span class="metric-value ${d.sym>=85?'good':d.sym>=70?'warn':'bad'}">${d.sym.toFixed(0)} / 100</span></div>`;
+
+      let c = [];
+      if (Math.abs(d.sDiff)>=1.5) c.push(d.sDiff>0?'左肩が下がっている傾向':'右肩が下がっている傾向');
+      if (Math.abs(d.hDiff)>=1.5) c.push(d.hDiff>0?'左骨盤が下がっている傾向':'右骨盤が下がっている傾向');
+      if (!c.length) c.push('大きな左右差は見られませんでした');
+      c.push('※姿勢スコアは本アプリ内の参考評価です。診断を行うものではありません。');
+      resComment.innerHTML = c.join('<br>');
+      results.style.display = 'block';
+    }
+
+    function showSidePostureResult() {
+      const d = calcSidePosture(landmarks);
+      postureSideResult = d;
+      const score = calcSideScore(d);
+      const grade = scoreGrade(score);
+
+      resTitle.textContent = '姿勢分析（側面）';
+      resContent.innerHTML = `
+        <div class="score-card">
+          <div class="score-number">${score}</div>
+          <div class="score-label">姿勢スコア / 100</div>
+          <div class="score-grade ${grade.cls}">${grade.text}</div>
+        </div>
+        <div class="metric"><span class="metric-label">頭部前方位</span>
+          <span class="metric-value">${d.headForward.toFixed(1)}%</span></div>
+        <div class="metric"><span class="metric-label">肩-骨盤アライメント</span>
+          <span class="metric-value">${d.trunk.toFixed(1)}%</span></div>`;
+      resComment.innerHTML =
+        '※側面の姿勢スコアは、頭部と体幹の相対的位置関係から算出する参考値です。<br>' +
+        '※診断・治療上の判定を目的とするものではありません。';
+      results.style.display = 'block';
+    }
+
+    function showShoulderResult() {
+      resTitle.textContent = GUIDES[movement].name + ' 測定結果';
+      resContent.innerHTML = `
+        <div class="metric"><span class="metric-label">最大角度</span>
+          <span class="metric-value good">${Math.round(maxAng)}°</span></div>
+        <div class="metric"><span class="metric-label">参考正常可動域</span>
+          <span class="metric-value" style="color:#94a3b8">約${NORMAL[movement]}°前後</span></div>`;
+      resComment.innerHTML = '肩複合体の参考値です。';
+      results.style.display = 'block';
+    }
+
+    async function initPose() {
+      if (pose) return true;
+      try {
+        pose = new Pose({
+          locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${f}`
+        });
+        pose.setOptions({
+          modelComplexity: 1,
+          smoothLandmarks: true,
+          minDetectionConfidence: 0.5,
+          minTrackingConfidence: 0.5
+        });
+        pose.onResults(onResults);
+        return true;
+      } catch (e) {
+        console.error('MediaPipe初期化失敗:', e);
+        pose = null;
+        return false;
+      }
+    }
+
+    function updateCamInfo() {
+      camInfo.textContent = mirrored ? '⚠ 前面カメラ' : '背面カメラ（推奨）';
+      camInfo.className = 'camera-info' + (mirrored ? ' warn' : '');
+      show(camInfo);
+    }
+
+    async function processFrame() {
+      if (pose && video.readyState >= 2 && !video.paused) {
+        try {
+          await pose.send({ image: video });
+        } catch (e) {
+          console.warn('Pose処理:', e);
+        }
+      }
+      animId = requestAnimationFrame(processFrame);
+    }
+
+    async function startCam() {
+      startBtn.disabled = true;
+      cameraHelp.classList.add('hidden');
+      setStatus('カメラ起動中...', '');
+
+      try {
+        // iPhone Safari向け：HTTPS/localhostとgetUserMediaの存在を確認
+        if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          throw new Error('SECURE_CONTEXT_REQUIRED');
+        }
+
+        const poseReady = await initPose();
+        if (!poseReady) throw new Error('POSE_INIT_FAILED');
+
+        if (stream) {
+          stream.getTracks().forEach(t => t.stop());
+          stream = null;
+        }
+
+        const constraints = {
+          audio: false,
+          video: {
+            facingMode: { ideal: facing },
+            width: { ideal: 640 },
+            height: { ideal: 480 }
+          }
+        };
+
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+
+        video.srcObject = stream;
+        video.muted = true;
+        video.autoplay = true;
+        video.playsInline = true;
+        video.setAttribute('playsinline', '');
+        video.setAttribute('webkit-playsinline', '');
+        video.controls = false;
+
+        // iOS Safariではメタデータ取得後にplayする方が安定
+        await new Promise(resolve => {
+          if (video.readyState >= 2) return resolve();
+          video.addEventListener('loadedmetadata', resolve, { once: true });
+        });
+
+        try {
+          await video.play();
+        } catch (playErr) {
+          console.warn('video.play:', playErr);
+        }
+
+        if (video.readyState < 2) {
+          throw new Error('VIDEO_NOT_READY');
+        }
+
+        if (animId) cancelAnimationFrame(animId);
+        processFrame();
+
+        hide(startBtn);
+        show(switchBtn);
+        updateCamInfo();
+        modeSelect.style.display = 'flex';
+        setStatus('カメラ起動完了。モードを選んでください', 'active');
+
+      } catch (e) {
+        console.error('カメラ起動エラー:', e);
+
+        if (stream) {
+          stream.getTracks().forEach(t => t.stop());
+          stream = null;
+        }
+
+        cameraHelp.classList.remove('hidden');
+
+        if (e.name === 'NotAllowedError' || e.name === 'PermissionDeniedError') {
+          setStatus('カメラが許可されていません。iPhoneのカメラ設定を確認してください', 'error');
+        } else if (e.name === 'NotFoundError') {
+          setStatus('カメラが見つかりません', 'error');
+        } else if (e.message === 'SECURE_CONTEXT_REQUIRED') {
+          setStatus('HTTPSまたはlocalhostで開いてください', 'error');
+        } else if (e.message === 'POSE_INIT_FAILED') {
+          setStatus('姿勢分析エンジンを読み込めませんでした。通信状態を確認してください', 'error');
+        } else {
+          setStatus('カメラを起動できませんでした。ページを再読み込みしてください', 'error');
+        }
+
+        startBtn.disabled = false;
+      }
+    }
+
+    async function switchCam() {
+      switchBtn.disabled = true;
+      setStatus('カメラ切替中...', '');
+
+      try {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          throw new Error('NO_CAMERA_API');
+        }
+
+        if (stream) {
+          stream.getTracks().forEach(t => t.stop());
+          stream = null;
+        }
+
+        facing = facing === 'user' ? 'environment' : 'user';
+        mirrored = facing === 'user';
+
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: {
+            facingMode: { ideal: facing },
+            width: { ideal: 640 },
+            height: { ideal: 480 }
+          }
+        });
+
+        video.srcObject = stream;
+        video.muted = true;
+        video.autoplay = true;
+        video.playsInline = true;
+
+        await new Promise(resolve => {
+          if (video.readyState >= 2) return resolve();
+          video.addEventListener('loadedmetadata', resolve, { once: true });
+        });
+
+        await video.play().catch(e => console.warn('switch play:', e));
+
+        updateCamInfo();
+        setStatus(mirrored ? '前面カメラ' : '背面カメラ（推奨）', 'active');
+
+      } catch (e) {
+        console.error('カメラ切替エラー:', e);
+        setStatus('カメラ切替に失敗しました', 'error');
+      } finally {
+        switchBtn.disabled = false;
+      }
+    }
+
+    startBtn.onclick = startCam;
+    switchBtn.onclick = switchCam;
+
+    document.getElementById('btnPosture').onclick = () => {
+      mode = 'posture'; movement = null; measuring = false;
+      moveSelect.style.display = 'none';
+      guide.style.display = 'none';
+      liveOverlay.classList.remove('active');
+      sidePostureLive.style.display = 'none';
+      results.style.display = 'none';
+      show(startMeasure); hide(stopMeasure);
+      setStatus('姿勢分析（正面）：リアルタイム表示中', 'active');
+    };
+
+    btnSidePosture.onclick = () => {
+      mode = 'sidePosture'; movement = null; measuring = false;
+      moveSelect.style.display = 'none';
+      guide.style.display = 'none';
+      liveOverlay.classList.remove('active');
+      postureLive.style.display = 'none';
+      sidePostureLive.style.display = 'none';
+      results.style.display = 'none';
+      show(startMeasure); hide(stopMeasure);
+      setStatus('姿勢分析（側面）：カメラを側面にして測定してください', 'active');
+    };
+
+    document.getElementById('btnShoulder').onclick = () => {
+      mode = 'shoulder'; movement = null; measuring = false;
+      postureLive.style.display = 'none';
+      sidePostureLive.style.display = 'none';
+      liveOverlay.classList.remove('active');
+      moveSelect.style.display = 'flex';
+      guide.style.display = 'none';
+      results.style.display = 'none';
+      hide(startMeasure); hide(stopMeasure);
+      setStatus('動作を選んでください', 'active');
+    };
+
+    moveSelect.querySelectorAll('button').forEach(btn => {
+      btn.onclick = () => {
+        movement = btn.dataset.m;
+        const g = GUIDES[movement];
+        guideTitle.textContent = g.name;
+        guideSteps.innerHTML = g.steps.map(s => `<li>${s}</li>`).join('');
+        guide.style.display = 'block';
+        results.style.display = 'none';
+        liveOverlay.classList.remove('active');
+        show(startMeasure); hide(stopMeasure);
+        setStatus(g.name + ' → 測定スタートで開始', 'active');
+      };
+    });
+
+    startMeasure.onclick = () => {
+      if (!landmarks) {
+        setStatus('姿勢が検出できていません', 'error');
+        return;
+      }
+      if (mode === 'posture') {
+        showPostureResult();
+        postureLive.style.display = 'none';
+        show(resetBtn);
+        setStatus('正面姿勢を記録しました', 'active');
+        return;
+      }
+
+      if (mode === 'sidePosture') {
+        showSidePostureResult();
+        sidePostureLive.style.display = 'none';
+        show(resetBtn);
+        setStatus('側面姿勢を記録しました', 'active');
+        return;
+      }
+      if (mode === 'shoulder' && movement) {
+        measuring = true;
+        maxAng = 0; angleBuf = [];
+        curAngleEl.textContent = '0°';
+        maxAngleEl.textContent = '0°';
+        feedbackEl.textContent = '計測中...';
+        feedbackEl.className = 'feedback';
+        romFill.style.width = '0%';
+        liveOverlay.classList.add('active');
+        hide(startMeasure); show(stopMeasure); show(resetBtn);
+        setStatus('【計測中】数値を見ながら動作してください', 'measuring');
+      }
+    };
+
+    stopMeasure.onclick = () => {
+      measuring = false;
+      liveOverlay.classList.remove('active');
+      hide(stopMeasure);
+      showShoulderResult();
+      setStatus('測定完了', 'active');
+    };
+
+    resetBtn.onclick = () => {
+      measuring = false;
+      cameraHelp.classList.add('hidden'); maxAng = 0; angleBuf = []; movement = null;
+      liveOverlay.classList.remove('active');
+      postureLive.style.display = 'none';
+      sidePostureLive.style.display = 'none';
+      results.style.display = 'none';
+      guide.style.display = 'none';
+      moveSelect.style.display = 'none';
+      hide(startMeasure); hide(stopMeasure); hide(resetBtn);
+      modeSelect.style.display = 'flex';
+      setStatus('リセットしました', 'active');
+    };
+  </script>
+</body>
+</html>
